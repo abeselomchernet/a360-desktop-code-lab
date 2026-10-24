@@ -34,6 +34,39 @@ def _validate_member_name(name: str) -> None:
             raise ValueError("Unsafe Windows archive member name")
 
 
+def _reject_ambiguous_raw_names(archive: ZipFile, infos: list) -> None:
+    """Inspect raw central-directory names before ZipInfo can normalize them.
+
+    On Windows, Python's ZipInfo normalizes backslashes to slashes when it
+    constructs member names. Validation of info.filename alone therefore
+    cannot distinguish an unsafe raw backslash from a canonical ZIP slash.
+    """
+    stream = archive.fp
+    start = getattr(archive, "start_dir", None)
+    if stream is None or not isinstance(start, int):
+        raise ValueError("Cannot inspect raw ZIP member names")
+    original_position = stream.tell()
+    try:
+        stream.seek(start)
+        for _ in infos:
+            header = stream.read(46)
+            if len(header) != 46 or header[:4] != b"PK\x01\x02":
+                raise ValueError("Invalid ZIP central-directory header")
+            name_length = int.from_bytes(header[28:30], "little")
+            extra_length = int.from_bytes(header[30:32], "little")
+            comment_length = int.from_bytes(header[32:34], "little")
+            raw_name = stream.read(name_length)
+            if (
+                len(raw_name) != name_length
+                or b"\\" in raw_name
+                or b"\x00" in raw_name
+            ):
+                raise ValueError("Ambiguous raw ZIP member name")
+            stream.seek(extra_length + comment_length, 1)
+    finally:
+        stream.seek(original_position)
+
+
 def preflight_archive(
     archive: ZipFile,
     destination_root: Path,
@@ -54,6 +87,7 @@ def preflight_archive(
     infos = archive.infolist()
     if not infos or len(infos) > max_files:
         raise ValueError("Archive file-count limit exceeded")
+    _reject_ambiguous_raw_names(archive, infos)
     total = 0
     paths: list[Path] = []
     keys: set[str] = set()
