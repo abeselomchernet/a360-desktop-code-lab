@@ -55,7 +55,9 @@ jobs:
 
           paths = [
               Path("lab/archive_preflight.py"),
+              Path("lab/patch_plan.py"),
               Path("tests/test_archive_preflight.py"),
+              Path("tests/test_patch_plan.py"),
               Path("test-results.txt"),
               Path("pipeline-probe.txt"),
           ]
@@ -71,13 +73,13 @@ jobs:
           }
           out = Path("release")
           out.mkdir(exist_ok=True)
-          archive_path = out / "A360_R02_public_synthetic_ci_hardening.zip"
+          archive_path = out / "A360_R02_public_synthetic_patch_plan.zip"
           with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
               for p in paths:
                   archive.write(p, str(p))
               archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
           digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
-          (out / "A360_R02_public_synthetic_ci_hardening.sha256").write_text(
+          (out / "A360_R02_public_synthetic_patch_plan.sha256").write_text(
               digest + "  " + archive_path.name + "\n", encoding="utf-8"
           )
           (out / "manifest.json").write_text(
