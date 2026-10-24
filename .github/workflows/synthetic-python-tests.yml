@@ -21,4 +21,48 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run isolated synthetic tests
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee test-results.txt
+      - name: Package public-safe increment with manifest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+
+          paths = [
+              Path("lab/archive_preflight.py"),
+              Path("tests/test_archive_preflight.py"),
+              Path("test-results.txt"),
+          ]
+          manifest = {
+              "scope": "PUBLIC_SYNTHETIC_ONLY",
+              "warning": "Not the complete private A360 R0.2 patch or local integration acceptance",
+              "source_commit": "${{ github.sha }}",
+              "files_sha256": {
+                  str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths
+              },
+          }
+          out = Path("release")
+          out.mkdir(exist_ok=True)
+          archive_path = out / "A360_R02_public_synthetic_preflight.zip"
+          with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+              for p in paths:
+                  archive.write(p, str(p))
+              archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+          digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+          (out / "A360_R02_public_synthetic_preflight.sha256").write_text(
+              digest + "  " + archive_path.name + "\n", encoding="utf-8"
+          )
+          (out / "manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          (out / "test-results.txt").write_bytes(Path("test-results.txt").read_bytes())
+          print("Package:", archive_path, "SHA256:", digest)
+          PY
+      - name: Upload public-safe test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: a360-r02-public-synthetic-preflight
+          path: release/
+          retention-days: 7
