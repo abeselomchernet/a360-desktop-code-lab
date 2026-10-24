@@ -1,0 +1,98 @@
+name: Synthetic Python Tests
+on:
+  push:
+    branches: ["main", "r02/public-safe-foundation"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify failed commands cannot be hidden by tee
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python -c 'import sys; sys.exit(7)' 2>&1 | tee pipeline-probe.txt
+          status=$?
+          set -e
+          if [ "$status" -ne 7 ]; then
+            echo "FAIL: pipeline masked a synthetic failing command"
+            exit 1
+          fi
+          echo "PASS: synthetic failure propagated with exit code $status"
+      - name: Run isolated synthetic tests (fail closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee test-results.txt
+      - name: Package public-safe increment with manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+
+          paths = [
+              Path("lab/archive_preflight.py"),
+              Path("lab/patch_plan.py"),
+              Path("tests/test_archive_preflight.py"),
+              Path("tests/test_patch_plan.py"),
+              Path("test-results.txt"),
+              Path("pipeline-probe.txt"),
+          ]
+          manifest = {
+              "scope": "PUBLIC_SYNTHETIC_ONLY",
+              "warning": "Not the complete private A360 R0.2 patch or local integration acceptance",
+              "source_commit": "${{ github.sha }}",
+              "runner_os": "${{ runner.os }}",
+              "python_version": "${{ matrix.python-version }}",
+              "files_sha256": {
+                  str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths
+              },
+          }
+          out = Path("release")
+          out.mkdir(exist_ok=True)
+          archive_path = out / "A360_R02_public_synthetic_patch_plan.zip"
+          with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+              for p in paths:
+                  archive.write(p, str(p))
+              archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+          digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+          (out / "A360_R02_public_synthetic_patch_plan.sha256").write_text(
+              digest + "  " + archive_path.name + "\n", encoding="utf-8"
+          )
+          (out / "manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          (out / "test-results.txt").write_bytes(Path("test-results.txt").read_bytes())
+          (out / "pipeline-probe.txt").write_bytes(Path("pipeline-probe.txt").read_bytes())
+          print("Package:", archive_path, "SHA256:", digest)
+          PY
+      - name: Upload public-safe CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a360-r02-public-synthetic-ci-${{ matrix.os }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
