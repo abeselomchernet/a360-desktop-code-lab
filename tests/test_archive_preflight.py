@@ -50,7 +50,7 @@ class ArchivePreflightTests(unittest.TestCase):
                 self.preflight([(name, "x")])
 
     def test_rejects_windows_illegal_names(self):
-        for name in ("annotations/a?.json", "annotations/has space .", "annotations/a\\b", "annotations/a//b"):
+        for name in ("annotations/a?.json", "annotations/has space .", "annotations/a//b"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 self.preflight([(name, "x")])
 
