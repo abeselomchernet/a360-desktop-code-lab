@@ -54,6 +54,26 @@ class ArchivePreflightTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 self.preflight([(name, "x")])
 
+    def test_rejects_raw_backslash_name_on_all_platforms(self):
+        # ZipInfo normalizes a backslash during creation on Windows, so
+        # mutate the raw local + central ZIP headers instead.
+        stream = make_archive([("annotations/a/b", "x")])
+        data = stream.getvalue()
+        original = b"annotations/a/b"
+        self.assertEqual(data.count(original), 2)
+        data = data.replace(original, b"annotations/a\\b")
+        with ZipFile(BytesIO(data)) as archive, self.assertRaises(ValueError):
+            preflight_archive(archive, self.root)
+
+    def test_rejects_raw_null_name_on_all_platforms(self):
+        stream = make_archive([("annotations/a/b", "x")])
+        data = stream.getvalue()
+        original = b"annotations/a/b"
+        self.assertEqual(data.count(original), 2)
+        data = data.replace(original, b"annotations/a\x00b")
+        with ZipFile(BytesIO(data)) as archive, self.assertRaises(ValueError):
+            preflight_archive(archive, self.root)
+
     def test_rejects_exact_duplicate_names(self):
         with self.assertRaises(ValueError):
             self.preflight([("annotations/a.json", "a"), ("annotations/a.json", "b")])
